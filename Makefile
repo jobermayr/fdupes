@@ -1,127 +1,34 @@
-#
-# fdupes Makefile
-#
+default:
+	@echo No target specified. Valid targets:
+	@echo " tarball"
+	@echo " tarball-dev"
+	@echo " clean"
+tarball:
+	cd dist ; make clean
+	$(ARCHIVE) dist fdupes-$(VERSION)
+	$(GNU_TAR) -c -z -v -f fdupes-$(VERSION).tar.gz fdupes-$(VERSION)
+	$(RMRF) fdupes-$(VERSION)
 
-#####################################################################
-# Standand User Configuration Section                               #
-#####################################################################
+tarball-dev: clean
+	$(GNU_TAR) --directory=.. -c -z -v -f \
+	../fdupes-$(DATE).tar.gz fdupes-dev
 
-#
-# PREFIX indicates the base directory used as the basis for the 
-# determination of the actual installation directories.
-# Suggested values are "/usr/local", "/usr", "/pkgs/fdupes-$(VERSION)"
-#
-PREFIX = /usr/local
+clean:
+	cd dist ; make clean
+	$(RM) *~
+	$(RM) *.tar.gz
+	$(RM) website/*~
 
-#
-# To use the md5sum program for calculating signatures (instead of the
-# built in MD5 message digest routines) uncomment the following
-# line (try this if you're having trouble with built in code).
-#
-#EXTERNAL_MD5 = -DEXTERNAL_MD5=\"md5sum\"
+include dist/Makefile.inc/VERSION
 
-#
-# Certain platforms do not support long options (command line options).
-# To disable long options, uncomment the following line.
-#
-#OMIT_GETOPT_LONG = -DOMIT_GETOPT_LONG
-
-#
-# This version of fdupes can use a red-black tree structure to
-# store file information. This is disabled by default, as it
-# hasn't been optimized or verified correct. If you wish to
-# enable this untested option, uncomment the following line.
-#
-#EXPERIMENTAL_RBTREE = -DEXPERIMENTAL_RBTREE
-
-#####################################################################
-# Developer Configuration Section                                   #
-#####################################################################
-
-#
-# VERSION determines the program's version number.
-#
-VERSION = 1.50-PR1
-
-#
-# PROGRAM_NAME determines the installation name and manual page name
-#
-PROGRAM_NAME=fdupes
-
-#
-# BIN_DIR indicates directory where program is to be installed. 
-# Suggested value is "$(PREFIX)/bin"
-#
-BIN_DIR = $(PREFIX)/bin
-
-#
-# MAN_DIR indicates directory where the fdupes man page is to be 
-# installed. Suggested value is "$(PREFIX)/man/man1"
-#
-MAN_BASE_DIR = $(PREFIX)/man
-MAN_DIR = $(MAN_BASE_DIR)/man1
-MAN_EXT = 1
-
-#
-# Required External Tools
-#
-
-INSTALL = install	# install : UCB/GNU Install compatiable
-#INSTALL = ginstall
+DATE = `date +%Y%m%d.%H%M`
 
 GNU_TAR = tar		# tar : GNU Tar 
 #GNU_TAR = gtar
 
-RM      = rm -f
+ARCHIVE = cp -a
 
-MKDIR   = mkdir -p
-#MKDIR   = mkdirhier 
-#MKDIR   = mkinstalldirs
+RM 	= rm -f
 
-#
-# Make Configuration
-#
-CC = gcc
-COMPILER_OPTIONS = -Wall -O -g
+RMRF    = rm -rf
 
-CFLAGS= $(COMPILER_OPTIONS) -I. -DVERSION=\"$(VERSION)\" $(EXTERNAL_MD5) $(EXPERIMENTAL_RBTREE) $(OMIT_GETOPT_LONG)
-
-INSTALL_PROGRAM = $(INSTALL) -c -m 0755
-INSTALL_DATA    = $(INSTALL) -c -m 0644
-
-#
-# ADDITIONAL_OBJECTS - some platforms will need additional object files
-# to support features not supplied by their vendor. Eg: GNU getopt()
-#
-#ADDITIONAL_OBJECTS = getopt.o
-
-OBJECT_FILES = fdupes.o md5/md5.o $(ADDITIONAL_OBJECTS)
-
-#####################################################################
-# no need to modify anything beyond this point                      #
-#####################################################################
-
-all: fdupes
-
-fdupes: $(OBJECT_FILES)
-	$(CC) $(CFLAGS) -o fdupes $(OBJECT_FILES)
-
-installdirs:
-	test -d $(BIN_DIR) || -$(MKDIR) $(BIN_DIR)
-	test -d $(MAN_DIR) || -$(MKDIR) $(MAN_DIR)
-
-install: fdupes installdirs
-	$(INSTALL_PROGRAM)	fdupes   $(BIN_DIR)/$(PROGRAM_NAME)
-	$(INSTALL_DATA)		fdupes.1 $(MAN_DIR)/$(PROGRAM_NAME).$(MAN_EXT)
-
-tarball: clean
-	$(GNU_TAR) --directory=.. -c -z -v \
-                   -f ../fdupes-$(VERSION).tar.gz fdupes-$(VERSION)
-
-clean:
-	$(RM) $(OBJECT_FILES)
-	$(RM) fdupes
-	$(RM) *~
-
-love:
-	@echo You\'re not my type. Go find a human partner.

@@ -1,4 +1,4 @@
-/* FDUPES Copyright (c) 1999-2001 Adrian Lopez
+/* FDUPES Copyright (c) 1999-2002 Adrian Lopez
 
    Permission is hereby granted, free of charge, to any person
    obtaining a copy of this software and associated documentation files
@@ -62,6 +62,7 @@ typedef struct _file {
   char *d_name;
   off_t size;
   char *crcsignature;
+  dev_t device;
   ino_t inode;
   int hasdupes; /* true only if file is first on duplicate chain */
   struct _file *duplicates;
@@ -70,18 +71,9 @@ typedef struct _file {
 
 typedef struct _filetree {
   file_t *file; 
-#ifdef EXPERIMENTAL_RBTREE
-  unsigned char color;
-  struct _filetree *parent;
-#endif
   struct _filetree *left;
   struct _filetree *right;
 } filetree_t;
-
-#ifdef EXPERIMENTAL_RBTREE
-#define COLOR_RED    0
-#define COLOR_BLACK  1
-#endif
 
 void errormsg(char *message, ...)
 {
@@ -131,6 +123,14 @@ off_t filesize(char *filename) {
   if (stat(filename, &s) != 0) return -1;
 
   return s.st_size;
+}
+
+dev_t getdevice(char *filename) {
+  struct stat s;
+
+  if (stat(filename, &s) != 0) return 0;
+
+  return s.st_dev;
 }
 
 ino_t getinode(char *filename) {
@@ -231,6 +231,7 @@ int grokdir(char *dir, file_t **filelistp)
 	exit(1);
       } else newfile->next = *filelistp;
 
+      newfile->device = 0;
       newfile->inode = 0;
       newfile->crcsignature = NULL;
       newfile->duplicates = NULL;
@@ -393,140 +394,11 @@ void purgetree(filetree_t *checktree)
   free(checktree);
 }
 
-#ifdef EXPERIMENTAL_RBTREE
-/* Use a red-black tree structure to store file information.
- */
-
-void rotate_left(filetree_t **root, filetree_t *node)
-{
-  filetree_t *subject;
-
-  subject = node->right;
-  node->right = subject->left;
-
-  if (subject->left != NULL) subject->left->parent = node;
-  subject->parent = node->parent;
-
-  if (node->parent == NULL) {
-    *root = subject;
-  } else {
-    if (node == node->parent->left)
-      node->parent->left = subject;
-    else 
-      node->parent->right = subject;
-  }
-
-  subject->left = node;
-  node->parent = subject;
-}
-
-void rotate_right(filetree_t **root, filetree_t *node)
-{
-  filetree_t *subject;
-
-  subject = node->left;
-  node->left = subject->right;
-
-  if (subject->right != NULL) subject->right->parent = node;
-  subject->parent = node->parent;
-
-  if (node->parent == NULL) {
-    *root = subject;
-  } else {
-    if (node == node->parent->left)
-      node->parent->left = subject;
-    else 
-      node->parent->right = subject;
-  }
-
-  subject->right = node;
-  node->parent = subject;
-}
-
-#define TREE_LEFT -1
-#define TREE_RIGHT 1
-#define TREE_ROOT  0
-
-void registerfile(filetree_t **root, filetree_t *parent, int loc, file_t *file)
-{
-  filetree_t *node;
-  filetree_t *uncle;
-
-  file->size = filesize(file->d_name);
-  file->inode = getinode(file->d_name);
-
-  node = (filetree_t*) malloc(sizeof(filetree_t));
-  if (node == NULL) {
-    errormsg("out of memory!\n");
-    exit(1);
-  }
-  
-  node->file = file;
-  node->left = NULL;
-  node->right = NULL;
-  node->parent = parent;
-  node->color = COLOR_RED;
-
-  if (loc == TREE_ROOT)
-    *root = node;
-  else if (loc == TREE_LEFT) 
-    parent->left = node;
-  else 
-    parent->right = node;
-
-  while (node != *root && node->parent->color == COLOR_RED) {
-    if (node->parent->parent == NULL) return;
-
-    if (node->parent == node->parent->parent->left) {
-      uncle = node->parent->parent->right;
-      if (uncle == NULL) return;
-
-      if (uncle->color == COLOR_RED) {
-	node->parent->color = COLOR_BLACK;
-	uncle->color = COLOR_BLACK;
-	node->parent->parent->color = COLOR_RED;
-	node = node->parent->parent;
-      } else {
-	if (node == node->parent->right) {
-	  node = node->parent;
-	  rotate_left(root, node);
-	}
-	node->parent->color = COLOR_BLACK;
-	node->parent->parent->color = COLOR_RED;
-	rotate_right(root, node->parent->parent);
-      }
-    } else {
-      uncle = node->parent->parent->left;
-      if (uncle == NULL) return;
-
-      if (uncle->color == COLOR_RED) {
-	node->parent->color = COLOR_BLACK;
-	uncle->color = COLOR_BLACK;
-	node->parent->parent->color = COLOR_RED;
-	node = node->parent->parent;
-      } else {
-	if (node == node->parent->right) {
-	  node = node->parent;
-	  rotate_left(root, node);
-	}
-	node->parent->color = COLOR_BLACK;
-	node->parent->parent->color = COLOR_RED;
-	rotate_right(root, node->parent->parent);
-      }
-    }
-  }
-
-  (*root)->color = COLOR_BLACK;
-}
-
-#endif /* [#ifdef EXPERIMENTAL_RBTREE] */
-
-#ifndef EXPERIMENTAL_RBTREE
-
 int registerfile(filetree_t **branch, file_t *file)
 {
   file->size = filesize(file->d_name);
   file->inode = getinode(file->d_name);
+  file->device = getdevice(file->d_name);
 
   *branch = (filetree_t*) malloc(sizeof(filetree_t));
   if (*branch == NULL) {
@@ -541,20 +413,21 @@ int registerfile(filetree_t **branch, file_t *file)
   return 1;
 }
 
-#endif /* [#ifndef EXPERIMENTAL_RBTREE] */
-
 file_t *checkmatch(filetree_t **root, filetree_t *checktree, file_t *file)
 {
   int cmpresult;
   char *crcsignature;
   off_t fsize;
 
-  /* If inodes are equal one of the files is a hard link, which
-     is usually not accidental. We don't want to flag them as 
-     duplicates, unless the user specifies otherwise. */
+  /* If device and inode fields are equal one of the files is a 
+     hard link to the other or the files have been listed twice 
+     unintentionally. We don't want to flag these files as
+     duplicates unless the user specifies otherwise.
+  */    
 
-  if (!ISFLAG(flags, F_CONSIDERHARDLINKS) && getinode(file->d_name) == 
-   checktree->file->inode) return NULL;
+  if (!ISFLAG(flags, F_CONSIDERHARDLINKS) && (getinode(file->d_name) == 
+      checktree->file->inode) && (getdevice(file->d_name) ==
+      checktree->file->device)) return NULL; 
 
   fsize = filesize(file->d_name);
   
@@ -594,22 +467,14 @@ file_t *checkmatch(filetree_t **root, filetree_t *checktree, file_t *file)
     if (checktree->left != NULL) {
       return checkmatch(root, checktree->left, file);
     } else {
-#ifndef EXPERIMENTAL_RBTREE
       registerfile(&(checktree->left), file);
-#else
-      registerfile(root, checktree, TREE_LEFT, file);
-#endif
       return NULL;
     }
   } else if (cmpresult > 0) {
     if (checktree->right != NULL) {
       return checkmatch(root, checktree->right, file);
     } else {
-#ifndef EXPERIMENTAL_RBTREE
       registerfile(&(checktree->right), file);
-#else
-      registerfile(root, checktree, TREE_RIGHT, file);
-#endif
       return NULL;
     }
   } else return checktree->file;
@@ -782,8 +647,12 @@ void autodelete(file_t *files)
 	if (preserve[x])
 	  printf("   [+] %s\n", dupelist[x]->d_name);
 	else {
-	  printf("   [-] %s\n", dupelist[x]->d_name);
-	  remove(dupelist[x]->d_name);
+	  if (remove(dupelist[x]->d_name) == 0) {
+	    printf("   [-] %s\n", dupelist[x]->d_name);
+	  } else {
+	    printf("   [!] %s ", dupelist[x]->d_name);
+	    printf("-- unable to delete file!\n");
+	  }
 	}
       }
       printf("\n");
@@ -867,7 +736,7 @@ int main(int argc, char **argv) {
 
   oldargv = cloneargs(argc, argv);
 
-  while ((opt = GETOPT(argc, argv, "frRq1SsHndvh"
+  while ((opt = GETOPT(argc, argv, "frRq1Ss::Hndvh"
 #ifndef OMIT_GETOPT_LONG
           , long_options, NULL
 #endif
@@ -927,6 +796,14 @@ int main(int argc, char **argv) {
 
   if (ISFLAG(flags, F_RECURSEAFTER)) {
     firstrecurse = nonoptafter("--recurse:", argc, oldargv, argv, optind);
+    
+    if (firstrecurse == argc)
+      firstrecurse = nonoptafter("-R", argc, oldargv, argv, optind);
+
+    if (firstrecurse == argc) {
+      errormsg("-R option must be isolated from other options\n");
+      exit(1);
+    }
 
     /* F_RECURSE is not set for directories before --recurse: */
     for (x = optind; x < firstrecurse; x++)
@@ -951,11 +828,7 @@ int main(int argc, char **argv) {
 
   while (curfile) {
     if (!checktree) 
-#ifndef EXPERIMENTAL_RBTREE
       registerfile(&checktree, curfile);
-#else
-      registerfile(&checktree, NULL, TREE_ROOT, curfile);
-#endif
     else 
       match = checkmatch(&checktree, checktree, curfile);
 
@@ -965,7 +838,7 @@ int main(int argc, char **argv) {
 	curfile = curfile->next;
 	continue;
       }
-
+      
       file2 = fopen(match->d_name, "rb");
       if (!file2) {
 	fclose(file1);
