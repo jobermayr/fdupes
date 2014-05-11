@@ -11,7 +11,7 @@
 # determination of the actual installation directories.
 # Suggested values are "/usr/local", "/usr", "/pkgs/fdupes-$(VERSION)"
 #
-PREFIX = /usr/local
+PREFIX ?= /usr/local
 
 #
 # When compiling for 32-bit systems, FILEOFFSET_64BIT must be enabled
@@ -39,7 +39,7 @@ FILEOFFSET_64BIT = -D_FILE_OFFSET_BITS=64
 #
 # VERSION determines the program's version number.
 #
-include Makefile.inc/VERSION
+VERSION = 1.51
 
 #
 # PROGRAM_NAME determines the installation name and manual page name
@@ -47,18 +47,24 @@ include Makefile.inc/VERSION
 PROGRAM_NAME=fdupes
 
 #
-# BIN_DIR indicates directory where program is to be installed. 
+# BINDIR indicates directory where program is to be installed. 
 # Suggested value is "$(PREFIX)/bin"
 #
-BIN_DIR = $(PREFIX)/bin
+BINDIR ?= $(PREFIX)/bin
 
 #
-# MAN_DIR indicates directory where the fdupes man page is to be 
+# MANDIR indicates directory where the fdupes man page is to be 
 # installed. Suggested value is "$(PREFIX)/man/man1"
 #
-MAN_BASE_DIR = $(PREFIX)/man
-MAN_DIR = $(MAN_BASE_DIR)/man1
+MANDIR ?= $(PREFIX)/man
 MAN_EXT = 1
+MAN_DIR = $(MANDIR)/man$(MAN_EXT)
+
+#
+# MACRODIR indicates directory where the RPM macro is to be installed.
+# macro.fdupes becomes only installed if set
+#
+MACRODIR ?=
 
 #
 # Required External Tools
@@ -78,9 +84,11 @@ MKDIR   = mkdir -p
 # Make Configuration
 #
 CC ?= gcc
-COMPILER_OPTIONS = -Wall -O -g
+FLAGS ?=
 
-CFLAGS= $(COMPILER_OPTIONS) -I. -DVERSION=\"$(VERSION)\" $(EXTERNAL_MD5) $(OMIT_GETOPT_LONG) $(FILEOFFSET_64BIT)
+COMPILER_OPTIONS = -Wall -O -g $(FLAGS)
+
+CFLAGS = $(COMPILER_OPTIONS) -I. -DVERSION=\"$(VERSION)\" $(EXTERNAL_MD5) $(OMIT_GETOPT_LONG) $(FILEOFFSET_64BIT)
 
 INSTALL_PROGRAM = $(INSTALL) -c -m 0755
 INSTALL_DATA    = $(INSTALL) -c -m 0644
@@ -102,14 +110,15 @@ all: fdupes
 fdupes: $(OBJECT_FILES)
 	$(CC) $(CFLAGS) -o fdupes $(OBJECT_FILES)
 
-installdirs:
-	test -d $(BIN_DIR) || $(MKDIR) $(BIN_DIR)
-	test -d $(MAN_DIR) || $(MKDIR) $(MAN_DIR)
-
-install: fdupes installdirs
-	$(INSTALL_PROGRAM)	fdupes   $(BIN_DIR)/$(PROGRAM_NAME)
-	$(INSTALL_DATA)		fdupes.1 $(MAN_DIR)/$(PROGRAM_NAME).$(MAN_EXT)
-
+install: fdupes
+	test -d $(DESTDIR)$(BINDIR) || $(MKDIR) $(DESTDIR)$(BINDIR)
+	test -d $(DESTDIR)$(MAN_DIR) || $(MKDIR) $(DESTDIR)$(MAN_DIR)
+	$(INSTALL_PROGRAM)	fdupes   $(DESTDIR)$(BINDIR)/$(PROGRAM_NAME)
+	$(INSTALL_DATA)		fdupes.1 $(DESTDIR)$(MAN_DIR)/$(PROGRAM_NAME).$(MAN_EXT)
+	if [ -n "$(MACRODIR)" ]; then \
+	  test -d $(DESTDIR)$(MACRODIR) || $(MKDIR) $(DESTDIR)$(MACRODIR); \
+	  $(INSTALL_DATA)	macros.fdupes $(DESTDIR)$(MACRODIR)/macros.fdupes; \
+	fi
 clean:
 	$(RM) $(OBJECT_FILES)
 	$(RM) fdupes
