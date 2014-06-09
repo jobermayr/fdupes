@@ -30,6 +30,9 @@ Usage: fdupes [options] DIRECTORY...
                         with -s or --symlinks, or when specifying a
                         particular directory more than once; refer to the
                         fdupes documentation for additional information
+ -l --link              create (hard|soft)links for duplicates. One of:
+    sym                 create relative symlinks (uses: -o name)
+    hard                create hardlinks
  -N --noprompt          together with --delete, preserve the first file in
                         each set of duplicates and delete the rest without
                         prompting the user

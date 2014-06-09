@@ -1,23 +1,10 @@
 
 %fdupes(s) \
- _target=""; \
  _symlinks=0; \
  %{-s:_symlinks=1;} \
- fdupes -q -p -n -o name -r %1 | \
-  while read _file; do \
-    if test -z "$_target" ; then \
-      _target="$_file"; \
-    else \
-      if test -z "$_file" ; then \
-	_target=""; \
-	continue ; \
-      fi ; \
-      if test "$_symlinks" = 1; then \
-        ln -sf "${_target#%{buildroot}}" "$_file"; \
-      else \
-        ln -f "$_target" "$_file"; \
-      fi ;\
-    fi ; \
- done \
+ if test "$_symlinks" = 1; then \
+  fdupes -q -p -n -o name -l sym -r %1 \
+ else \
+  fdupes -q -p -n -o name -l hard -r %1 \
+ fi ; \
 %{nil}
-

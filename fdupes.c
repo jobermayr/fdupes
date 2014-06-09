@@ -32,6 +32,8 @@
 #include <string.h>
 #include <errno.h>
 #include <libgen.h>
+#include <limits.h>
+#include <unistd.h>
 
 #ifndef EXTERNAL_MD5
 #include "md5/md5.h"
@@ -54,6 +56,8 @@
 #define F_SUMMARIZEMATCHES  0x0800
 #define F_EXCLUDEHIDDEN     0x1000
 #define F_PERMISSIONS       0x2000
+#define F_CREATERELSYMLINK  0x4000
+#define F_CREATEHARDLINK    0x8000
 
 typedef enum {
   ORDER_TIME = 0,
@@ -678,6 +682,71 @@ void summarizematches(file_t *files)
   }
 }
 
+void create_rel_symlink(const char *path, const char *base)
+{
+	const char *pp, *bp, *branch;
+	char result[PATH_MAX];
+	/*
+	 * endp points the last position which is safe in the result buffer.
+	 */
+	const char *endp = result + PATH_MAX - 1;
+	char *rp;
+
+	branch = path;
+	/*
+	 * find branch position
+	*/
+	for (pp = path, bp = base; *pp && *bp && *pp == *bp; pp++, bp++)
+		if (*pp == '/')
+			branch = pp;
+
+	if ((*pp == 0 || (*pp == '/' && *(pp + 1) == 0)) &&
+	    (*bp == 0 || (*bp == '/' && *(bp + 1) == 0))) {
+		rp = result;
+		*rp++ = '.';
+		if (*pp == '/' || *(pp - 1) == '/')
+			*rp++ = '/';
+		if (rp > endp)
+			goto erange;
+		*rp = 0;
+		goto finish;
+	}
+	if ((*pp == 0 && *bp == '/') || (*pp == '/' && *bp == 0))
+		branch = pp;
+	/*
+	 * up to root.
+	 */
+	rp = result;
+	for (bp = base + (branch - path) + 1; *bp; bp++)
+		if (*bp == '/' && *(bp + 1) != 0) {
+			if (rp + 3 > endp)
+				goto erange;
+			*rp++ = '.';
+			*rp++ = '.';
+			*rp++ = '/';
+		}
+	if (rp > endp)
+		goto erange;
+	*rp = 0;
+	/*
+	 * down to leaf.
+	 */
+	if (*branch) {
+		if (rp + strlen(branch + 1) > endp)
+			goto erange;
+		strcpy(rp, branch + 1);
+	} else
+		*--rp = 0;
+finish:
+	// printf("relative_path = %s\n", result);
+	remove(base);
+	symlink(result, base);
+	return;
+erange:
+	errno = ERANGE;
+	printf("ERROR: symlink is too long");
+}
+
 void printmatches(file_t *files)
 {
   file_t *tmpfile;
@@ -694,6 +763,12 @@ void printmatches(file_t *files)
       while (tmpfile != NULL) {
 	if (ISFLAG(flags, F_DSAMELINE)) escapefilename("\\ ", &tmpfile->d_name);
 	printf("%s%c", tmpfile->d_name, ISFLAG(flags, F_DSAMELINE)?' ':'\n');
+	if (ISFLAG(flags, F_CREATERELSYMLINK)) {
+	  create_rel_symlink(files->d_name, tmpfile->d_name);
+	} else if (ISFLAG(flags, F_CREATEHARDLINK)) {
+	  remove(tmpfile->d_name);
+	  link(files->d_name, tmpfile->d_name);
+	}
 	tmpfile = tmpfile->duplicates;
       }
       printf("\n");
@@ -1003,7 +1078,9 @@ void help_text()
   printf("                  \twith -s or --symlinks, or when specifying a\n");
   printf("                  \tparticular directory more than once; refer to the\n");
   printf("                  \tfdupes documentation for additional information\n");
-  /*printf(" -l --relink      \t(description)\n");*/
+  printf(" -l --link        \tcreate (hard|soft)links for duplicates. One of:\n");
+  printf("    sym           \tcreate relative symlinks (uses: -o name)\n");
+  printf("    hard          \tcreate hardlinks\n");
   printf(" -N --noprompt    \ttogether with --delete, preserve the first file in\n");
   printf("                  \teach set of duplicates and delete the rest without\n");
   printf("                  \tprompting the user\n");
@@ -1046,7 +1123,7 @@ int main(int argc, char **argv) {
     { "size", 0, 0, 'S' },
     { "symlinks", 0, 0, 's' },
     { "hardlinks", 0, 0, 'H' },
-    { "relink", 0, 0, 'l' },
+    { "link", 1, 0, 'l' },
     { "noempty", 0, 0, 'n' },
     { "nohidden", 0, 0, 'A' },
     { "delete", 0, 0, 'd' },
@@ -1068,7 +1145,7 @@ int main(int argc, char **argv) {
 
   oldargv = cloneargs(argc, argv);
 
-  while ((opt = GETOPT(argc, argv, "frRq1SsHlndvhNmpo:"
+  while ((opt = GETOPT(argc, argv, "frRq1SsHl:ndvhNmpo:"
 #ifndef OMIT_GETOPT_LONG
           , long_options, NULL
 #endif
@@ -1107,6 +1184,16 @@ int main(int argc, char **argv) {
     case 'd':
       SETFLAG(flags, F_DELETEFILES);
       break;
+    case 'l':
+      if (!strcasecmp("sym", optarg)) {
+	SETFLAG(flags, F_CREATERELSYMLINK);
+      } else if (!strcasecmp("hard", optarg)) {
+	SETFLAG(flags, F_CREATEHARDLINK);
+      } else {
+	errormsg("invalid value for --link: '%s'\n", optarg);
+	exit(1);
+      }
+      break;
     case 'v':
       printf("fdupes %s\n", VERSION);
       exit(0);
@@ -1138,6 +1225,9 @@ int main(int argc, char **argv) {
       exit(1);
     }
   }
+
+  if (ISFLAG(flags, F_CREATERELSYMLINK))
+    ordertype = ORDER_NAME;
 
   if (optind >= argc) {
     errormsg("no directories specified\n");
